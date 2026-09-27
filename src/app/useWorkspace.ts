@@ -44,7 +44,8 @@ function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export function useWorkspace(): Workspace {
+/** `initialSample` (from a shared link) wins over the saved workspace. */
+export function useWorkspace(initialSample: string | null = null): Workspace {
   const dbRef = useRef<MinigrafDb | null>(null);
   const rulesRef = useRef<string[]>([]);
   // All database work goes through this chain so operations never overlap.
@@ -132,7 +133,14 @@ export function useWorkspace(): Workspace {
         await loadEngine();
         if (cancelled) return;
         const saved = await loadWorkspace();
-        if (saved) {
+        // A shared link opens its sample, but never silently replaces the user's own edits.
+        const openLink =
+          initialSample !== null &&
+          sampleById(initialSample) !== undefined &&
+          (!saved || saved.sampleId !== null || confirm("Open the shared sample? It replaces your current workspace."));
+        if (openLink && initialSample) {
+          await buildSample(initialSample);
+        } else if (saved) {
           const db = openInMemory();
           await db.importGraph(saved.graph);
           for (const rule of saved.rules ?? []) await runForm(db, rule).catch(() => undefined);
@@ -153,6 +161,7 @@ export function useWorkspace(): Workspace {
     return () => {
       cancelled = true;
     };
+    // Boot runs once; initialSample is only read on the first render.
   }, [enqueue, rebuild, buildSample]);
 
   const loadSample = useCallback((id: string) => enqueue(() => buildSample(id)), [enqueue, buildSample]);

@@ -10,6 +10,7 @@ import { QueryConsole } from "./components/QueryConsole";
 import { TimeControls } from "./components/TimeControls";
 import { TxLog } from "./components/TxLog";
 import type { ValidAt } from "./lib/datalog";
+import { formatPermalink, parsePermalink } from "./lib/permalink";
 import { sampleById, SAMPLES } from "./samples";
 
 type View = "graph" | "map" | "facts";
@@ -37,8 +38,9 @@ function useTheme(): [string, () => void] {
 }
 
 export default function App() {
-  const ws = useWorkspace();
-  const now = useNow();
+  const pendingLink = useRef(parsePermalink(window.location.hash));
+  const ws = useWorkspace(pendingLink.current?.sample ?? null);
+  const now = useNow(ws.revision);
   const cursor = useCursor(ws.history.maxTx, ws.revision);
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState<View>("graph");
@@ -56,6 +58,32 @@ export default function App() {
   useEffect(() => {
     if (selected && !vm.model.nodes.has(selected)) setSelected(null);
   }, [selected, vm.model]);
+
+  // Apply a shared link once its sample has loaded.
+  useEffect(() => {
+    const link = pendingLink.current;
+    if (!link) return;
+    if (ws.sampleId !== link.sample || ws.history.maxTx === 0) {
+      // The link was declined or its sample is unknown: forget it.
+      if (ws.status.kind === "ready") pendingLink.current = null;
+      return;
+    }
+    pendingLink.current = null;
+    cursor.setBoth(link.tx ?? ws.history.maxTx, link.validAt ?? cursor.validAt);
+    if (link.entity && vm.model.nodes.has(link.entity)) setSelected(link.entity);
+    // Runs when a new history arrives; the cursor and model are read, not tracked.
+  }, [ws.revision, ws.status.kind]);
+
+  // Keep the address bar in step with the view while a sample is unedited.
+  useEffect(() => {
+    if (ws.status.kind !== "ready" || pendingLink.current) return;
+    const hash = ws.sampleId
+      ? formatPermalink(ws.sampleId, cursor.asOf, cursor.validAt, selected ? vm.model.labelOf(selected) : null)
+      : "";
+    if (hash !== window.location.hash) {
+      history.replaceState(null, "", `${window.location.pathname}${window.location.search}${hash}`);
+    }
+  }, [ws.status.kind, ws.sampleId, cursor.asOf, cursor.validAt, selected, vm.model]);
 
   const setCursor = useCallback((asOf: number, validAt: ValidAt) => cursor.setBoth(asOf, validAt), [cursor]);
 

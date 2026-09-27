@@ -66,9 +66,14 @@ export function useCursor(maxTx: number, revision: number): CursorState {
   );
 }
 
-/** Current wall-clock time, refreshed every 30 seconds. */
-export function useNow(): number {
+/**
+ * Current wall-clock time, refreshed every 30 seconds and whenever the data
+ * changes. A fact written without `:valid-from` is valid from its transaction
+ * time, so "now" must never lag behind the newest write.
+ */
+export function useNow(revision: number): number {
   const [now, setNow] = useState(() => Date.now());
+  useEffect(() => setNow(Date.now()), [revision]);
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(id);
