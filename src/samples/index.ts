@@ -8,6 +8,8 @@ export interface Sample {
   summary: string;
   /** A short "try this" hint shown after loading. */
   hint: string;
+  /** Example queries for the console. */
+  queries: string[];
   script: string;
 }
 
@@ -16,6 +18,11 @@ const careers: Sample = {
   title: "Careers & corrections",
   summary: "Job history with back-dated facts, a wrong salary that gets corrected, and a job that ends.",
   hint: "Open the bitemporal map and drag the crosshair. Rectangles that stop part-way up were retracted: that is a correction, not a change in the real world.",
+  queries: [
+    "(query [:find ?name ?company :where [?p :person/name ?name] [?p :works-at ?c] [?c :company/name ?company]])",
+    "(query [:find ?salary ?tx :any-valid-time :where [:alice :salary ?salary] [:alice :db/tx-count ?tx]])",
+    "(query [:find ?who ?boss :where [?w :reports-to ?b] [?w :person/name ?who] [?b :person/name ?boss]])",
+  ],
   script: `; tx 1-2: Alice's employment history with explicit valid time
 (transact {:valid-from "2020-01-01" :valid-to "2023-06-01"}
           [[:alice :works-at :techcorp]])
@@ -62,6 +69,11 @@ const agentMemory: Sample = {
   title: "Agent memory",
   summary: "An AI agent stores beliefs about a user, learns it was wrong, and keeps an audit trail.",
   hint: "Step through the transaction log. At tx 4 the agent retracts a belief. Scrub back to tx 3 to see exactly what it believed when it made the recommendation.",
+  queries: [
+    "(query [:find ?pref :where [:user-ana :prefers ?pref]])",
+    "(query [:find ?b ?source ?conf :where [?b :belief/about :user-ana] [?b :belief/source ?source] [?b :belief/confidence ?conf]])",
+    "(query [:find ?name :where [:user-ana :works-on ?p] [?p :project/name ?name]])",
+  ],
   script: `; tx 1: first conversation
 (transact {:valid-from "2026-01-10"}
           [[:user-ana :user/name "Ana"]
@@ -112,6 +124,11 @@ const orderFsm: Sample = {
   title: "Order state machine",
   summary: "Legal transitions stored as facts; an order moves through its lifecycle one transaction at a time.",
   hint: "Press play. Watch the :fsm/state edge of :order-42 jump between states while the transition graph stays fixed.",
+  queries: [
+    "(query [:find ?order ?state :where [?order :fsm/state ?state]])",
+    "(query [:find ?event ?to :where [:order-42 :fsm/state ?s] [?t :transition/from ?s] [?t :transition/event ?event] [?t :transition/to ?to]])",
+    "(query [:find (count ?o) :where [?o :fsm/state :delivered]])",
+  ],
   script: `; tx 1: the state machine itself
 (transact {:valid-from "2026-03-01"}
           [[:t-pay :transition/from :awaiting-payment]
@@ -162,6 +179,11 @@ const dependencies: Sample = {
   title: "Dependency upgrades",
   summary: "A service's dependency graph changes release by release. Ask what it looked like at any release.",
   hint: "Use the query console with the time cursor pinned: the same query returns the dependency set of whatever release you scrub to.",
+  queries: [
+    "(query [:find ?name :where [:myapp :depends-on ?d] [?d :pkg/name ?name]])",
+    "(query [:find ?name :where (dep :myapp ?d) [?d :pkg/name ?name]])",
+    "(query [:find ?pkg ?sev :where [?c :cve/affects ?p] [?c :cve/severity ?sev] (dep :myapp ?p) [?p :pkg/name ?pkg]])",
+  ],
   // Minigraf 2.x can merge two values of one attribute on one entity written in
   // the same transact or retract (minigraf#371), so each :depends-on value of
   // the same package goes in its own call.
@@ -223,6 +245,11 @@ const catalog: Sample = {
   title: "Corestore catalog",
   summary: "The Minigraf tutorial store: a category tree and products whose prices change over time.",
   hint: "Select a product and look at the inspector: each price is a separate fact version with its own valid-time range.",
+  queries: [
+    "(query [:find ?name ?price :where [?p :product/name ?name] [?p :product/price ?price]])",
+    "(query [:find ?cat (count ?p) :where [?p :product/category ?c] [?c :category/name ?cat]])",
+    "(query [:find ?price ?vf ?vt :any-valid-time :where [:laptop-pro :product/price ?price] [:laptop-pro :db/valid-from ?vf] [:laptop-pro :db/valid-to ?vt]])",
+  ],
   script: `; tx 1: category hierarchy (from the Minigraf tutorial dataset)
 (transact {:valid-from "2024-01-01"}
           [[:cat-electronics :category/name "Electronics"]

@@ -146,3 +146,45 @@ export function attributeColor(attribute: string, attributes: string[]): string 
   for (const ch of attribute) h = (h * 31 + ch.charCodeAt(0)) | 0;
   return PALETTE[Math.abs(h) % PALETTE.length];
 }
+
+/**
+ * A rough "type" for each node: the most common attribute namespace on the
+ * entity (`:person/name` -> `person`). Stub nodes are `value`.
+ */
+export function nodeKinds(history: History, model: GraphModel): Map<string, string> {
+  const counts = new Map<string, Map<string, number>>();
+  for (const f of history.facts.values()) {
+    const slash = f.a.indexOf("/");
+    const ns = slash > 1 ? f.a.slice(1, slash) : "entity";
+    let m = counts.get(f.e);
+    if (!m) counts.set(f.e, (m = new Map()));
+    // Un-namespaced attributes (`:works-at`) only decide the kind when nothing else does.
+    m.set(ns, (m.get(ns) ?? 0) + (ns === "entity" ? 0.01 : 1));
+  }
+  const kinds = new Map<string, string>();
+  for (const n of model.nodes.values()) {
+    const m = counts.get(n.id);
+    if (!m || n.stub) {
+      kinds.set(n.id, "value");
+      continue;
+    }
+    let best = "entity";
+    let bestCount = -1;
+    for (const [ns, c] of m) {
+      if (c > bestCount || (c === bestCount && ns < best)) {
+        best = ns;
+        bestCount = c;
+      }
+    }
+    kinds.set(n.id, best);
+  }
+  return kinds;
+}
+
+const KIND_PALETTE = ["#7c9cff", "#f2994a", "#3ecf8e", "#c678dd", "#56c7d6", "#e5c07b", "#ff7eb6", "#a3be8c"];
+
+export function kindColor(kind: string, kinds: string[]): string {
+  if (kind === "value") return "var(--muted)";
+  const idx = kinds.indexOf(kind);
+  return KIND_PALETTE[(idx >= 0 ? idx : 0) % KIND_PALETTE.length];
+}

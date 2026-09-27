@@ -17,6 +17,7 @@
   "dependencies": {
     "@minigraf/browser": "2.0.2",
     "d3-force": "^3.0.0",
+    "d3-scale": "^4.0.2",
     "d3-selection": "^3.0.0",
     "d3-zoom": "^3.0.0",
     "react": "^19.3.0",
@@ -25,6 +26,7 @@
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "@types/d3-force": "^3.0.10",
+    "@types/d3-scale": "^4.0.9",
     "@types/d3-selection": "^3.0.12",
     "@types/d3-zoom": "^3.0.8",
     "@types/node": "^24.0.0",
