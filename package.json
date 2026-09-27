@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Time travel visualizer for Minigraf bi-temporal databases",
+  "homepage": "https://project-minigraf.github.io/minigraf-visualizer/",
   "license": "MIT OR Apache-2.0",
   "type": "module",
   "scripts": {
