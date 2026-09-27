@@ -246,6 +246,15 @@ export default function App() {
         </div>
       )}
 
+      {ws.history.totalTx !== undefined && (
+        <div className="notice info" role="status">
+          <span>
+            This database has {ws.history.totalTx} transactions. The visualizer read the first {ws.history.maxTx}; later
+            ones are not shown.
+          </span>
+        </div>
+      )}
+
       <main className="workspace">
         <TxLog vm={vm} onPick={cursor.setAsOf} onSelectEntity={(id) => setSelected(id)} />
 

@@ -50,6 +50,8 @@ export interface TxInfo {
 
 export interface History {
   maxTx: number;
+  /** Transactions in the database, when more than `maxTx` were read (the rest were skipped). */
+  totalTx?: number;
   /** `txs[i]` describes transaction `i + 1`. */
   txs: TxInfo[];
   facts: Map<string, FactVersion>;
@@ -180,8 +182,9 @@ export async function extractHistory(
   options: ExtractOptions = {},
 ): Promise<History> {
   const limit = options.maxTransactions ?? 5000;
-  const maxTx = Math.min(await lastTxCount(db, openInMemory), limit);
-  return readTransactions(db, emptyHistory(), maxTx, options);
+  const total = await lastTxCount(db, openInMemory);
+  const h = await readTransactions(db, emptyHistory(), Math.min(total, limit), options);
+  return total > limit ? { ...h, totalTx: total } : h;
 }
 
 /**
@@ -196,10 +199,12 @@ export async function extendHistory(
   options: ExtractOptions = {},
 ): Promise<History> {
   const limit = options.maxTransactions ?? 5000;
-  const maxTx = Math.min(await lastTxCount(db, openInMemory), limit);
+  const total = await lastTxCount(db, openInMemory);
+  const maxTx = Math.min(total, limit);
   if (maxTx < previous.maxTx) return extractHistory(db, openInMemory, options);
-  if (maxTx === previous.maxTx) return previous;
-  return readTransactions(db, previous, maxTx, options);
+  if (maxTx === previous.maxTx && total === (previous.totalTx ?? previous.maxTx)) return previous;
+  const h = await readTransactions(db, previous, maxTx, options);
+  return total > limit ? { ...h, totalTx: total } : { ...h, totalTx: undefined };
 }
 
 export function emptyHistory(): History {

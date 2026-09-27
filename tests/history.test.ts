@@ -112,3 +112,16 @@ describe.each(SAMPLES)("sample $id", (sample) => {
     for (const n of g.nodes.values()) expect(n.label.startsWith("#")).toBe(false);
   });
 });
+
+describe("transaction cap", () => {
+  it("reads at most maxTransactions and reports the real total", async () => {
+    const db = openMemory();
+    await runScript(db, "(transact [[:a :n 1]]) (transact [[:a :n 2]]) (transact [[:a :n 3]]) (retract [[:a :n 1]])");
+    const h = await extractHistory(db, openMemory, { maxTransactions: 2 });
+    expect(h.maxTx).toBe(2);
+    expect(h.totalTx).toBe(4);
+    expect(h.txs).toHaveLength(2);
+    const all = await extractHistory(db, openMemory);
+    expect(all.totalTx).toBeUndefined();
+  });
+});

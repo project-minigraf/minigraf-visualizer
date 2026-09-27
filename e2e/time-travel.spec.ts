@@ -88,3 +88,13 @@ test("exported .graph files open again", async ({ page }) => {
   await expect(page.getByText("as of tx 11")).toBeVisible();
   await expect(page.locator('.g-node[data-label=":alice"]')).toBeVisible();
 });
+
+test("the map shows valid-time intervals for a selected attribute", async ({ page }) => {
+  await fresh(page);
+  await page.getByRole("tab", { name: "Bitemporal map" }).click();
+  await page.locator(".map-toolbar select").nth(1).selectOption(":salary");
+  // Two salary versions: the wrong 75000 (retracted) and the corrected 80000.
+  await expect(page.locator(".fact-rect")).toHaveCount(2);
+  await expect(page.locator(".fact-rect.retracted")).toHaveCount(1);
+  await expect(page.locator(".map-toolbar")).toContainText("2 fact versions");
+});
