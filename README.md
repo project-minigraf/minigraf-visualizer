@@ -45,6 +45,7 @@ Your workspace is kept in the browser (IndexedDB) and comes back when you reload
 | Order state machine | Transitions stored as facts; an order moving through its states |
 | Dependency upgrades | A dependency graph across releases, with a recursive rule for transitive dependencies |
 | Corestore catalog | The Minigraf tutorial store: a category tree and prices that change over time |
+| Corestore tutorial (wiki) | The exact dataset from wiki tutorial sections 1 to 3. Transaction numbers match the text. |
 
 The samples follow the recipes in the [Minigraf wiki cookbook](https://github.com/project-minigraf/minigraf/wiki/Cookbook-Bitemporal-Modeling) and the scenarios in [minigraf-examples](https://github.com/project-minigraf/minigraf-examples).
 
@@ -63,7 +64,7 @@ Docs and examples can link straight to a view. Everything goes after `#`, so it 
 
 | Parameter | Meaning |
 |---|---|
-| `sample` | A built-in sample: `careers`, `agent-memory`, `order-fsm`, `dependencies` or `catalog` |
+| `sample` | A built-in sample: `careers`, `agent-memory`, `order-fsm`, `dependencies`, `catalog` or `corestore-tutorial` |
 | `data` | A Datalog script, as base64url of its UTF-8 text. Use instead of `sample`. |
 | `title` | Name shown in the header for a `data` link |
 | `tx` | Transaction-time cursor (`:as-of`). Default: the latest transaction. |
