@@ -1,5 +1,7 @@
 # minigraf-visualizer
 
+**[Open the visualizer →](https://project-minigraf.github.io/minigraf-visualizer/)**
+
 Time travel visualizer for [Minigraf](https://github.com/project-minigraf/minigraf) bi-temporal databases. Part of the Minigraf ecosystem.
 
 Minigraf keeps two kinds of time for every fact:
