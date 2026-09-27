@@ -25,6 +25,15 @@ Your workspace is kept in the browser (IndexedDB) and comes back when you reload
 
 ![Bitemporal map for :alice, showing a corrected salary](docs/bitemporal-map.png)
 
+## Typical workflow
+
+1. **Load data.** Start with a sample, open a `.graph` file, or press *New* and write facts in the *Query* tab.
+2. **Find the change you care about.** Read the transaction log on the left. Each row shows how many fact versions it added (`+`) and removed (`−`). Click a row, or press play, and watch the graph. Green is new at that transaction. Red is gone.
+3. **Look at one entity or attribute over time.** Click a node. The inspector lists every version with its valid range and the transactions that wrote and removed it. Open the *Bitemporal map* and filter by entity or attribute to see the valid-time intervals as boxes.
+4. **Pick a point in both times.** Drag in the map, or use the two sliders. The transaction slider sets what the database knew. The valid-time slider sets the date you ask about.
+5. **Ask a question at that point.** In the *Query* tab, keep *Run at the time cursor* on. Your query runs with the cursor's `:as-of` and `:valid-at` added, and the console shows the exact query it ran. Clauses you write yourself are kept.
+6. **Keep or share it.** Save the database as a `.graph` file, or copy the address bar link (built-in samples only).
+
 ### Samples
 
 | Sample | Shows |
@@ -62,10 +71,14 @@ Minigraf stores `:alice` as a UUID (v5 of the keyword in the OID namespace). The
 
 ### Limits
 
-- Opening a database takes one query per transaction, and each query reads every fact. As a guide, 500 transactions with 1,500 facts take about 4 seconds. A progress bar shows while it runs. The app reads at most 5,000 transactions.
+- Opening a database takes one query per transaction, and each query reads every fact. As a guide, 500 transactions with 1,500 facts take about 4 seconds. A progress bar shows while it runs. The app reads at most 5,000 transactions and shows a notice if a file has more.
 - Rules are not stored in `.graph` files. The app replays rules for its own workspace, but not for opened files.
 - Minigraf 2.x can merge two values of the same attribute on one entity if they are written in one `transact` or `retract` ([minigraf#371](https://github.com/project-minigraf/minigraf/issues/371)). Write each value in its own call. The samples do this.
 - The wall-clock time of a retraction-only transaction is not queryable, so the log shows "retract" instead of a time.
+- All times are shown and entered in UTC. Minigraf's `:valid-at` takes whole seconds, so a pinned query rounds the valid-time cursor down to the second.
+- An opened `.graph` file does not record the keywords used to write it. Entities are named from keyword values that point at them, or from a `name`, `title` or `label` attribute. Other entities show a short id.
+- Query results come from the real engine. The graph, map and tables use the rebuilt history, which is checked against the engine in the tests.
+- The app runs in the browser only and needs WebAssembly. Your workspace stays in that browser.
 
 ## Development
 
