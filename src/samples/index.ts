@@ -309,7 +309,166 @@ const catalog: Sample = {
 `,
 };
 
-export const SAMPLES: Sample[] = [careers, agentMemory, orderFsm, dependencies, catalog];
+const corestoreTutorial: Sample = {
+  id: "corestore-tutorial",
+  title: "Corestore tutorial (wiki)",
+  summary: "The dataset from the Minigraf wiki tutorial, sections 1 to 3: the store, orders, a price drop and corrected sale prices.",
+  hint: "Transaction numbers match the tutorial. Step to tx 6 to see the price Ben paid, then to tx 12 and open the map on :laptop-pro to see the corrected winter sale price.",
+  queries: [
+    "(query [:find ?price :where [:laptop-pro :product/price ?price]])",
+    "(query [:find ?sale :valid-at \"2026-01-15\" :where [:laptop-pro :product/sale-price ?sale]])",
+    "(query [:find ?sale ?vf ?vt :any-valid-time :where [:laptop-pro :product/sale-price ?sale] [:laptop-pro :db/valid-from ?vf] [:laptop-pro :db/valid-to ?vt]])",
+  ],
+  // Copied from demos/tutorial_corestore_setup.txt in the minigraf repo and the
+  // wiki pages Tutorial-01 to Tutorial-03, so transaction numbers match the text.
+  script: `# ================================================================
+# Corestore Tutorial Dataset
+# ================================================================
+# Base setup for the Minigraf Datalog tutorial series.
+# All tutorial sections assume this has been loaded first.
+#
+# Run with: cargo run < demos/tutorial_corestore_setup.txt
+#
+# After loading: tx_count = 3
+# ================================================================
+
+# ── tx 1: Category hierarchy ─────────────────────────────────────
+# Electronics
+#   ├── Laptops
+#   ├── Mobile
+#   ├── Audio
+#   │   └── Headphones
+#   │       └── Noise-Cancelling
+#   └── Accessories
+
+(transact [
+  [:cat-electronics :category/name "Electronics"]
+  [:cat-laptops     :category/name "Laptops"]
+  [:cat-laptops     :category/parent :cat-electronics]
+  [:cat-mobile      :category/name "Mobile"]
+  [:cat-mobile      :category/parent :cat-electronics]
+  [:cat-audio       :category/name "Audio"]
+  [:cat-audio       :category/parent :cat-electronics]
+  [:cat-headphones  :category/name "Headphones"]
+  [:cat-headphones  :category/parent :cat-audio]
+  [:cat-nc          :category/name "Noise-Cancelling"]
+  [:cat-nc          :category/parent :cat-headphones]
+  [:cat-accessories :category/name "Accessories"]
+  [:cat-accessories :category/parent :cat-electronics]
+])
+
+# ── tx 2: Product catalog ─────────────────────────────────────────
+# Two products per major leaf category for window function examples.
+
+(transact [
+  [:laptop-pro    :product/name "LaptopPro 15"]
+  [:laptop-pro    :product/sku "LP-15"]
+  [:laptop-pro    :product/price 1299]
+  [:laptop-pro    :product/category :cat-laptops]
+
+  [:laptop-budget :product/name "BudgetBook 14"]
+  [:laptop-budget :product/sku "LB-14"]
+  [:laptop-budget :product/price 699]
+  [:laptop-budget :product/category :cat-laptops]
+
+  [:phone-x       :product/name "PhoneX 12"]
+  [:phone-x       :product/sku "PX-12"]
+  [:phone-x       :product/price 799]
+  [:phone-x       :product/category :cat-mobile]
+
+  [:phone-prev    :product/name "PhoneX 11"]
+  [:phone-prev    :product/sku "PX-11"]
+  [:phone-prev    :product/price 599]
+  [:phone-prev    :product/category :cat-mobile]
+
+  [:nc-headphones :product/name "NoiseCancel Pro"]
+  [:nc-headphones :product/sku "NC-PRO"]
+  [:nc-headphones :product/price 249]
+  [:nc-headphones :product/category :cat-nc]
+
+  [:usb-cable     :product/name "USB-C Cable 2m"]
+  [:usb-cable     :product/sku "USB-C-2M"]
+  [:usb-cable     :product/price 19]
+  [:usb-cable     :product/category :cat-accessories]
+
+  [:keyboard-k1   :product/name "Compact Keyboard"]
+  [:keyboard-k1   :product/sku "KB-K1"]
+  [:keyboard-k1   :product/price 89]
+  [:keyboard-k1   :product/category :cat-accessories]
+
+  [:monitor-27    :product/name "ClearView 27\\" Monitor"]
+  [:monitor-27    :product/sku "CV-27"]
+  [:monitor-27    :product/price 449]
+  [:monitor-27    :product/category :cat-electronics]
+])
+
+# ── tx 3: Customers ───────────────────────────────────────────────
+
+(transact [
+  [:alice :customer/name "Alice"]
+  [:alice :customer/email "alice@example.com"]
+  [:ben   :customer/name "Ben"]
+  [:ben   :customer/email "ben@example.com"]
+  [:clara :customer/name "Clara"]
+  [:clara :customer/email "clara@example.com"]
+])
+
+; ---- Tutorial 1 (tx 4-5) ----
+; tx 4: Alice's first order
+(transact [
+  [:alice-order-1        :order/customer :alice]
+  [:alice-order-1        :order/status :placed]
+  [:alice-order-1-item-1 :order-item/order :alice-order-1]
+  [:alice-order-1-item-1 :order-item/product :phone-x]
+  [:alice-order-1-item-1 :order-item/qty 1]
+  [:alice-order-1-item-1 :order-item/price 799]
+  [:alice-order-1-item-2 :order-item/order :alice-order-1]
+  [:alice-order-1-item-2 :order-item/product :usb-cable]
+  [:alice-order-1-item-2 :order-item/qty 1]
+  [:alice-order-1-item-2 :order-item/price 19]
+])
+; tx 5: Alice cancels the USB cable
+(retract [
+  [:alice-order-1-item-2 :order-item/order :alice-order-1]
+  [:alice-order-1-item-2 :order-item/product :usb-cable]
+  [:alice-order-1-item-2 :order-item/qty 1]
+  [:alice-order-1-item-2 :order-item/price 19]
+])
+
+; ---- Tutorial 2 (tx 6-8) ----
+; tx 6: Ben places his order
+(transact [
+  [:ben-order-1        :order/customer :ben]
+  [:ben-order-1        :order/status :placed]
+  [:ben-order-1-item-1 :order-item/order :ben-order-1]
+  [:ben-order-1-item-1 :order-item/product :laptop-pro]
+  [:ben-order-1-item-1 :order-item/qty 1]
+  [:ben-order-1-item-1 :order-item/price-at-purchase 1299]
+])
+; tx 7: remove the old price
+(retract [[:laptop-pro :product/price 1299]])
+
+; tx 8: record the new price
+(transact [[:laptop-pro :product/price 1259]])
+
+; ---- Tutorial 3 (tx 9-12) ----
+; tx 9: Winter sale price — valid Jan 1 through Feb 28
+(transact {:valid-from "2026-01-01" :valid-to "2026-02-28"}
+          [[:laptop-pro :product/sale-price 1099]])
+
+; tx 10: Spring sale price — valid May 20 through Jun 30
+(transact {:valid-from "2026-05-20" :valid-to "2026-06-30"}
+          [[:laptop-pro :product/sale-price 1149]])
+; tx 11: Retract the wrong winter sale price
+(retract [[:laptop-pro :product/sale-price 1099]])
+
+; tx 12: Record the correct winter sale price — same valid window
+(transact {:valid-from "2026-01-01" :valid-to "2026-02-28"}
+          [[:laptop-pro :product/sale-price 1049]])
+`,
+};
+
+export const SAMPLES: Sample[] = [careers, agentMemory, orderFsm, dependencies, catalog, corestoreTutorial];
 
 export function sampleById(id: string): Sample | undefined {
   return SAMPLES.find((s) => s.id === id);

@@ -21,7 +21,7 @@ This app lets you move along both axes and see the graph change. Everything runs
 - **Inspect an entity.** See what is true at the cursor and every version it ever had, with the transaction that wrote or retracted it. Click a version to jump there.
 - **Run Datalog.** The console can pin each query to the time cursor. It adds `:as-of` and `:valid-at` for you. Writes become new transactions and the history is rebuilt.
 - **Open and save `.graph` files.** Files are byte-compatible with native Minigraf. Open a file made by the Rust, Python or other bindings (checkpoint it first so no `.wal` sidecar is pending).
-- **Share a view.** For the built-in samples, the address bar holds the sample, cursor and selection, for example `#sample=careers&tx=6&vt=2023-06-01T00:00:00Z&e=:alice`.
+- **Share a view.** The address bar holds the sample, cursor, selection and view, for example `#sample=careers&tx=6&vt=2023-06-01T00:00:00Z&e=:alice&view=map`. A link can also carry its own Datalog script (see [Linking to the visualizer](#linking-to-the-visualizer)).
 
 Your workspace is kept in the browser (IndexedDB) and comes back when you reload.
 
@@ -45,6 +45,7 @@ Your workspace is kept in the browser (IndexedDB) and comes back when you reload
 | Order state machine | Transitions stored as facts; an order moving through its states |
 | Dependency upgrades | A dependency graph across releases, with a recursive rule for transitive dependencies |
 | Corestore catalog | The Minigraf tutorial store: a category tree and prices that change over time |
+| Corestore tutorial (wiki) | The exact dataset from wiki tutorial sections 1 to 3. Transaction numbers match the text. |
 
 The samples follow the recipes in the [Minigraf wiki cookbook](https://github.com/project-minigraf/minigraf/wiki/Cookbook-Bitemporal-Modeling) and the scenarios in [minigraf-examples](https://github.com/project-minigraf/minigraf-examples).
 
@@ -56,6 +57,33 @@ The samples follow the recipes in the [Minigraf wiki cookbook](https://github.co
 | `Space` | Play / pause |
 | `Esc` | Clear the selection |
 | `Ctrl`+`Enter` | Run the query in the console |
+
+## Linking to the visualizer
+
+Docs and examples can link straight to a view. Everything goes after `#`, so it never leaves the reader's browser.
+
+| Parameter | Meaning |
+|---|---|
+| `sample` | A built-in sample: `careers`, `agent-memory`, `order-fsm`, `dependencies`, `catalog` or `corestore-tutorial` |
+| `data` | A Datalog script, as base64url of its UTF-8 text. Use instead of `sample`. |
+| `title` | Name shown in the header for a `data` link |
+| `tx` | Transaction-time cursor (`:as-of`). Default: the latest transaction. |
+| `vt` | Valid-time cursor: `now`, `any`, or a date such as `2023-06-01` |
+| `e` | Entity to select, as a keyword (`:alice`) or a UUID |
+| `view` | `graph` (default), `map` or `facts` |
+
+Examples:
+
+- [The corrected salary on the bitemporal map](https://project-minigraf.github.io/minigraf-visualizer/#sample=careers&tx=7&vt=now&e=:alice&view=map): `#sample=careers&tx=7&vt=now&e=:alice&view=map`
+- What the agent believed when it made its recommendation: `#sample=agent-memory&tx=3&vt=any&e=:user-ana`
+
+To make a `data` link from a script file:
+
+```sh
+node scripts/make-link.mjs recipe.dl --title "Retroactive correction" --tx 3 --e :alice --view map
+```
+
+If a reader has edited their own workspace, the app asks before a link replaces it. If a linked script fails to run, the app says so and keeps the previous workspace.
 
 ## How it works
 

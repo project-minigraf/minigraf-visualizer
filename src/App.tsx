@@ -10,7 +10,7 @@ import { QueryConsole } from "./components/QueryConsole";
 import { TimeControls } from "./components/TimeControls";
 import { TxLog } from "./components/TxLog";
 import type { ValidAt } from "./lib/datalog";
-import { formatPermalink, parsePermalink } from "./lib/permalink";
+import { formatPermalink, parsePermalink, sameSource } from "./lib/permalink";
 import { sampleById, SAMPLES } from "./samples";
 
 type View = "graph" | "map" | "facts";
@@ -39,7 +39,7 @@ function useTheme(): [string, () => void] {
 
 export default function App() {
   const pendingLink = useRef(parsePermalink(window.location.hash));
-  const ws = useWorkspace(pendingLink.current?.sample ?? null);
+  const ws = useWorkspace(pendingLink.current?.source ?? null);
   const now = useNow(ws.revision);
   const cursor = useCursor(ws.history.maxTx, ws.revision);
   const [selected, setSelected] = useState<string | null>(null);
@@ -63,7 +63,7 @@ export default function App() {
   useEffect(() => {
     const link = pendingLink.current;
     if (!link) return;
-    if (ws.sampleId !== link.sample || ws.history.maxTx === 0) {
+    if (!sameSource(ws.origin, link.source) || ws.history.maxTx === 0) {
       // The link was declined or its sample is unknown: forget it.
       if (ws.status.kind === "ready") pendingLink.current = null;
       return;
@@ -71,19 +71,20 @@ export default function App() {
     pendingLink.current = null;
     cursor.setBoth(link.tx ?? ws.history.maxTx, link.validAt ?? cursor.validAt);
     if (link.entity && vm.model.nodes.has(link.entity)) setSelected(link.entity);
+    if (link.view) setView(link.view);
     // Runs when a new history arrives; the cursor and model are read, not tracked.
   }, [ws.revision, ws.status.kind]);
 
   // Keep the address bar in step with the view while a sample is unedited.
   useEffect(() => {
     if (ws.status.kind !== "ready" || pendingLink.current) return;
-    const hash = ws.sampleId
-      ? formatPermalink(ws.sampleId, cursor.asOf, cursor.validAt, selected ? vm.model.labelOf(selected) : null)
+    const hash = ws.origin
+      ? formatPermalink(ws.origin, cursor.asOf, cursor.validAt, selected ? vm.model.labelOf(selected) : null, view)
       : "";
     if (hash !== window.location.hash) {
       history.replaceState(null, "", `${window.location.pathname}${window.location.search}${hash}`);
     }
-  }, [ws.status.kind, ws.sampleId, cursor.asOf, cursor.validAt, selected, vm.model]);
+  }, [ws.status.kind, ws.origin, cursor.asOf, cursor.validAt, selected, vm.model, view]);
 
   const setCursor = useCallback((asOf: number, validAt: ValidAt) => cursor.setBoth(asOf, validAt), [cursor]);
 
@@ -231,6 +232,11 @@ export default function App() {
         </div>
       </header>
 
+      {ws.linkError && (
+        <div className="notice error" role="alert">
+          <span>{ws.linkError}</span>
+        </div>
+      )}
       {notice && (
         <div className={`notice ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>
           <span>{notice.text}</span>

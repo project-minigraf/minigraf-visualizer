@@ -10,6 +10,8 @@ export interface SavedWorkspace {
   /** Where the data came from, for the header. */
   source: string;
   sampleId: string | null;
+  /** Set when the workspace came from a link that carried its own script. */
+  script?: { text: string; title: string };
   /** `(rule ...)` forms. Rules live in memory only, so we replay them on load. */
   rules: string[];
 }
