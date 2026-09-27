@@ -4,7 +4,8 @@ async function fresh(page: Page, hash = "") {
   await page.goto(`/${hash}`);
   // A hash-only change does not reload the page; a shared link always opens fresh.
   if (hash) await page.reload();
-  await expect(page.locator(".g-node").first()).toBeVisible();
+  // Ready once the transaction log shows the cursor (works for every view).
+  await expect(page.locator(".tx-item.current")).toBeVisible();
 }
 
 test.beforeEach(async ({ page }) => {
@@ -97,4 +98,27 @@ test("the map shows valid-time intervals for a selected attribute", async ({ pag
   await expect(page.locator(".fact-rect")).toHaveCount(2);
   await expect(page.locator(".fact-rect.retracted")).toHaveCount(1);
   await expect(page.locator(".map-toolbar")).toContainText("2 fact versions");
+});
+
+test("links can carry their own Datalog script", async ({ page }) => {
+  const script = `(transact {:valid-from "2024-01-01"} [[:alice :salary 75000]])
+(retract [[:alice :salary 75000]])
+(transact {:valid-from "2024-01-01"} [[:alice :salary 80000]])`;
+  const data = Buffer.from(script, "utf8").toString("base64url");
+  await fresh(page, `#data=${data}&title=Retroactive%20correction&tx=1&e=:alice&view=map`);
+  await expect(page.locator(".brand")).toContainText("Retroactive correction");
+  await expect(page.getByText("as of tx 1")).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Bitemporal map" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".inspector h2")).toHaveText(":alice");
+  await expect(page.locator(".fact-rect")).toHaveCount(2);
+  // The address bar keeps the script, so the view can be shared on.
+  await page.keyboard.press("ArrowRight");
+  await expect(page).toHaveURL(/data=.*tx=2/);
+});
+
+test("a link with a broken script falls back and says why", async ({ page }) => {
+  const data = Buffer.from("(transact [[:a :b", "utf8").toString("base64url");
+  await fresh(page, `#data=${data}&title=Broken`);
+  await expect(page.getByRole("alert")).toContainText("did not run");
+  await expect(page.locator(".g-node").first()).toBeVisible();
 });

@@ -20,12 +20,23 @@ export interface RunOutcome {
   error: DatalogError | null;
 }
 
+/** Where an unedited workspace came from. Links can reopen it. */
+export type Origin = { kind: "sample"; id: string } | { kind: "script"; script: string; title: string } | null;
+
+/** What a shared link asks the app to open. */
+export type LinkRequest = { kind: "sample"; id: string } | { kind: "script"; script: string; title: string };
+
+type Meta = { aliases: Map<string, string>; source: string; origin: Origin };
+
 export interface Workspace {
   status: Status;
   history: History;
   aliases: Map<string, string>;
   source: string;
   sampleId: string | null;
+  origin: Origin;
+  /** Set when a shared link's script failed to run. */
+  linkError: string | null;
   progress: Progress | null;
   /** Bumps each time the history is rebuilt. */
   revision: number;
@@ -44,8 +55,8 @@ function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** `initialSample` (from a shared link) wins over the saved workspace. */
-export function useWorkspace(initialSample: string | null = null): Workspace {
+/** A shared link (`initial`) wins over the saved workspace. */
+export function useWorkspace(initial: LinkRequest | null = null): Workspace {
   const dbRef = useRef<MinigrafDb | null>(null);
   const rulesRef = useRef<string[]>([]);
   // All database work goes through this chain so operations never overlap.
@@ -55,12 +66,14 @@ export function useWorkspace(initialSample: string | null = null): Workspace {
   const [history, setHistory] = useState<History>(emptyHistory);
   const [aliases, setAliases] = useState<Map<string, string>>(new Map());
   const [source, setSource] = useState("");
-  const [sampleId, setSampleId] = useState<string | null>(null);
+  const [origin, setOrigin] = useState<Origin>(null);
+  const sampleId = origin?.kind === "sample" ? origin.id : null;
   const [progress, setProgress] = useState<Progress | null>(null);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [generation, setGeneration] = useState(0);
-  const metaRef = useRef({ aliases, source, sampleId });
-  metaRef.current = { aliases, source, sampleId };
+  const metaRef = useRef<Meta>({ aliases, source, origin });
+  metaRef.current = { aliases, source, origin };
 
   const enqueue = useCallback(<T,>(job: () => Promise<T>): Promise<T> => {
     const next = queue.current.then(job, job);
@@ -92,27 +105,28 @@ export function useWorkspace(initialSample: string | null = null): Workspace {
     }
   }, []);
 
-  const persist = useCallback(async (meta: { aliases: Map<string, string>; source: string; sampleId: string | null }) => {
+  const persist = useCallback(async (meta: Meta) => {
     const db = dbRef.current;
     if (!db) return;
     await saveWorkspace({
       graph: db.exportGraph(),
       aliases: [...meta.aliases],
       source: meta.source,
-      sampleId: meta.sampleId,
+      sampleId: meta.origin?.kind === "sample" ? meta.origin.id : null,
+      script: meta.origin?.kind === "script" ? { text: meta.origin.script, title: meta.origin.title } : undefined,
       rules: rulesRef.current,
     });
   }, []);
 
   /** Swap in a new database and rebuild everything from it. */
   const replace = useCallback(
-    async (db: MinigrafDb, meta: { aliases: Map<string, string>; source: string; sampleId: string | null }, rules: string[]) => {
+    async (db: MinigrafDb, meta: Meta, rules: string[]) => {
       dbRef.current?.free();
       dbRef.current = db;
       rulesRef.current = rules;
       setAliases(meta.aliases);
       setSource(meta.source);
-      setSampleId(meta.sampleId);
+      setOrigin(meta.origin);
       setGeneration((g) => g + 1);
       await rebuild();
       await persist(meta);
@@ -120,16 +134,29 @@ export function useWorkspace(initialSample: string | null = null): Workspace {
     [rebuild, persist],
   );
 
+  /** Run a Datalog script in a fresh database and make it the workspace. */
+  const buildScript = useCallback(
+    async (script: string, title: string, origin: Origin) => {
+      const db = openInMemory();
+      try {
+        await runScript(db, script);
+      } catch (e) {
+        db.free();
+        throw e;
+      }
+      const rules = splitForms(script).filter((f) => formKind(f) === "rule");
+      await replace(db, { aliases: aliasesFromSource(script), source: title, origin }, rules);
+    },
+    [replace],
+  );
+
   const buildSample = useCallback(
     async (id: string) => {
       const sample = sampleById(id);
       if (!sample) throw new Error(`Unknown sample ${id}`);
-      const db = openInMemory();
-      await runScript(db, sample.script);
-      const rules = splitForms(sample.script).filter((f) => formKind(f) === "rule");
-      await replace(db, { aliases: aliasesFromSource(sample.script), source: sample.title, sampleId: id }, rules);
+      await buildScript(sample.script, sample.title, { kind: "sample", id });
     },
-    [replace],
+    [buildScript],
   );
 
   /** Reopen a saved workspace. Returns false if it cannot be read. */
@@ -147,7 +174,13 @@ export function useWorkspace(initialSample: string | null = null): Workspace {
       rulesRef.current = saved.rules ?? [];
       setAliases(new Map(saved.aliases));
       setSource(saved.source);
-      setSampleId(saved.sampleId);
+      setOrigin(
+        saved.sampleId
+          ? { kind: "sample", id: saved.sampleId }
+          : saved.script
+            ? { kind: "script", script: saved.script.text, title: saved.script.title }
+            : null,
+      );
       await rebuild();
       return true;
     },
@@ -163,12 +196,20 @@ export function useWorkspace(initialSample: string | null = null): Workspace {
         if (cancelled) return;
         const saved = await loadWorkspace();
         // A shared link opens its sample, but never silently replaces the user's own edits.
+        const usable = initial !== null && (initial.kind === "script" || sampleById(initial.id) !== undefined);
+        const savedIsOwnWork = saved !== null && !saved.sampleId && !saved.script;
         const openLink =
-          initialSample !== null &&
-          sampleById(initialSample) !== undefined &&
-          (!saved || saved.sampleId !== null || confirm("Open the shared sample? It replaces your current workspace."));
-        if (openLink && initialSample) {
-          await buildSample(initialSample);
+          usable && (!savedIsOwnWork || confirm("Open the shared link? It replaces your current workspace."));
+        if (openLink && initial?.kind === "sample") {
+          await buildSample(initial.id);
+        } else if (openLink && initial?.kind === "script") {
+          try {
+            await buildScript(initial.script, initial.title, initial);
+          } catch (e) {
+            // A broken link should not leave the user with nothing to look at.
+            setLinkError(`The link's Datalog did not run: ${message(e)}`);
+            if (!saved || !(await restore(saved))) await buildSample(DEFAULT_SAMPLE);
+          }
         } else if (!saved || !(await restore(saved))) {
           await buildSample(DEFAULT_SAMPLE);
         }
@@ -180,8 +221,8 @@ export function useWorkspace(initialSample: string | null = null): Workspace {
     return () => {
       cancelled = true;
     };
-    // Boot runs once; initialSample is only read on the first render.
-  }, [enqueue, restore, buildSample]);
+    // Boot runs once; `initial` is only read on the first render.
+  }, [enqueue, restore, buildSample, buildScript]);
 
   const loadSample = useCallback((id: string) => enqueue(() => buildSample(id)), [enqueue, buildSample]);
 
@@ -197,7 +238,7 @@ export function useWorkspace(initialSample: string | null = null): Workspace {
             `Could not open ${name}: ${message(e)}. The file must be a checkpointed Minigraf .graph file (no pending .wal sidecar).`,
           );
         }
-        await replace(db, { aliases: new Map(), source: name, sampleId: null }, []);
+        await replace(db, { aliases: new Map(), source: name, origin: null }, []);
       }),
     [enqueue, replace],
   );
@@ -205,7 +246,7 @@ export function useWorkspace(initialSample: string | null = null): Workspace {
   const exportGraph = useCallback(() => dbRef.current?.exportGraph() ?? null, []);
 
   const clear = useCallback(
-    () => enqueue(() => replace(openInMemory(), { aliases: new Map(), source: "Empty database", sampleId: null }, [])),
+    () => enqueue(() => replace(openInMemory(), { aliases: new Map(), source: "Empty database", origin: null }, [])),
     [enqueue, replace],
   );
 
@@ -237,10 +278,10 @@ export function useWorkspace(initialSample: string | null = null): Workspace {
         const meta = { ...metaRef.current };
         if (wrote) {
           meta.aliases = aliasesFromSource(src, new Map(meta.aliases));
-          meta.sampleId = null;
+          meta.origin = null;
           if (!meta.source.endsWith("(edited)")) meta.source = `${meta.source || "Workspace"} (edited)`;
           setAliases(meta.aliases);
-          setSampleId(null);
+          setOrigin(null);
           setSource(meta.source);
           await rebuild(true);
         }
@@ -256,6 +297,8 @@ export function useWorkspace(initialSample: string | null = null): Workspace {
     aliases,
     source,
     sampleId,
+    origin,
+    linkError,
     progress,
     revision,
     generation,
