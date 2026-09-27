@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { formKind, pinQuery, splitForms, type ValidAt } from "../lib/datalog";
 import { DatalogError, runForm, runScript, type CommandResult, type MinigrafDb } from "../lib/engine";
 import { aliasesFromSource } from "../lib/graph";
-import { emptyHistory, extractHistory, type History } from "../lib/history";
-import { loadWorkspace, saveWorkspace } from "../lib/persist";
+import { emptyHistory, extendHistory, extractHistory, type History } from "../lib/history";
+import { loadWorkspace, saveWorkspace, type SavedWorkspace } from "../lib/persist";
 import { loadEngine, openInMemory } from "../lib/wasm";
 import { sampleById, SAMPLES } from "../samples";
 
@@ -68,16 +68,23 @@ export function useWorkspace(initialSample: string | null = null): Workspace {
     return next;
   }, []);
 
-  const rebuild = useCallback(async () => {
+  const historyRef = useRef<History>(history);
+
+  /** Read the history from scratch, or (`incremental`) only the new transactions. */
+  const rebuild = useCallback(async (incremental = false) => {
     const db = dbRef.current;
     if (!db) return;
     setProgress({ done: 0, total: 0 });
     try {
-      const h = await extractHistory(db, openInMemory, {
-        onProgress: (done, total) => {
+      const options = {
+        onProgress: (done: number, total: number) => {
           if (total > 20) setProgress({ done, total });
         },
-      });
+      };
+      const h = incremental
+        ? await extendHistory(db, openInMemory, historyRef.current, options)
+        : await extractHistory(db, openInMemory, options);
+      historyRef.current = h;
       setHistory(h);
       setRevision((r) => r + 1);
     } finally {
@@ -125,6 +132,28 @@ export function useWorkspace(initialSample: string | null = null): Workspace {
     [replace],
   );
 
+  /** Reopen a saved workspace. Returns false if it cannot be read. */
+  const restore = useCallback(
+    async (saved: SavedWorkspace): Promise<boolean> => {
+      const db = openInMemory();
+      try {
+        await db.importGraph(saved.graph);
+      } catch {
+        db.free();
+        return false;
+      }
+      for (const rule of saved.rules ?? []) await runForm(db, rule).catch(() => undefined);
+      dbRef.current = db;
+      rulesRef.current = saved.rules ?? [];
+      setAliases(new Map(saved.aliases));
+      setSource(saved.source);
+      setSampleId(saved.sampleId);
+      await rebuild();
+      return true;
+    },
+    [rebuild],
+  );
+
   // Boot: load the engine, then restore the saved workspace or load a sample.
   useEffect(() => {
     let cancelled = false;
@@ -140,17 +169,7 @@ export function useWorkspace(initialSample: string | null = null): Workspace {
           (!saved || saved.sampleId !== null || confirm("Open the shared sample? It replaces your current workspace."));
         if (openLink && initialSample) {
           await buildSample(initialSample);
-        } else if (saved) {
-          const db = openInMemory();
-          await db.importGraph(saved.graph);
-          for (const rule of saved.rules ?? []) await runForm(db, rule).catch(() => undefined);
-          dbRef.current = db;
-          rulesRef.current = saved.rules ?? [];
-          setAliases(new Map(saved.aliases));
-          setSource(saved.source);
-          setSampleId(saved.sampleId);
-          await rebuild();
-        } else {
+        } else if (!saved || !(await restore(saved))) {
           await buildSample(DEFAULT_SAMPLE);
         }
         setStatus({ kind: "ready" });
@@ -162,7 +181,7 @@ export function useWorkspace(initialSample: string | null = null): Workspace {
       cancelled = true;
     };
     // Boot runs once; initialSample is only read on the first render.
-  }, [enqueue, rebuild, buildSample]);
+  }, [enqueue, restore, buildSample]);
 
   const loadSample = useCallback((id: string) => enqueue(() => buildSample(id)), [enqueue, buildSample]);
 
@@ -223,7 +242,7 @@ export function useWorkspace(initialSample: string | null = null): Workspace {
           setAliases(meta.aliases);
           setSampleId(null);
           setSource(meta.source);
-          await rebuild();
+          await rebuild(true);
         }
         if (wrote || results.some((r) => r.kind === "rule")) await persist(meta);
         return { results, wrote, error };

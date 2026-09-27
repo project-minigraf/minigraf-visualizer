@@ -66,9 +66,16 @@ export interface ExtractOptions {
   maxTransactions?: number;
 }
 
+// Every fact version visible as of a transaction, at any valid time. The
+// wall-clock `:db/tx-id` is fetched separately (TX_TIME_QUERY): each extra
+// pseudo-attribute join makes this query, which runs once per transaction,
+// noticeably slower.
 const SNAPSHOT_QUERY = (asOf: number) =>
-  `(query [:find ?e ?a ?v ?tx ?tid ?vf ?vt :as-of ${asOf} :any-valid-time ` +
-  `:where [?e ?a ?v] [?e :db/tx-count ?tx] [?e :db/tx-id ?tid] [?e :db/valid-from ?vf] [?e :db/valid-to ?vt]])`;
+  `(query [:find ?e ?a ?v ?tx ?vf ?vt :as-of ${asOf} :any-valid-time ` +
+  `:where [?e ?a ?v] [?e :db/tx-count ?tx] [?e :db/valid-from ?vf] [?e :db/valid-to ?vt]])`;
+
+const TX_TIME_QUERY = (asOf: number) =>
+  `(query [:find ?tx ?tid :as-of ${asOf} :any-valid-time :where [?e ?a ?v] [?e :db/tx-count ?tx] [?e :db/tx-id ?tid]])`;
 
 const PROBE_ATTR = ":minigraf-visualizer/probe";
 
@@ -87,11 +94,85 @@ export async function lastTxCount(db: MinigrafDb, openInMemory: OpenInMemory): P
   }
 }
 
-function versionKey(e: string, a: string, v: Scalar, tx: number, vf: number, vt: number | null): string {
-  return JSON.stringify([e, a, v, tx, vf, vt]);
-}
+/**
+ * Read transactions `from..to` and fold them into `base`, which must describe
+ * transactions `1..from-1` of the same database. `base` is not modified.
+ *
+ * A version's visibility in transaction time is one interval: once a
+ * retraction (or a newer assertion of the same fact and valid-time window)
+ * hides it, it never comes back. So diffing neighbouring snapshots is exact.
+ */
+async function readTransactions(
+  db: MinigrafDb,
+  base: History,
+  to: number,
+  options: ExtractOptions,
+): Promise<History> {
+  const from = base.maxTx + 1;
+  const facts = new Map(base.facts);
+  const txs = base.txs.slice(0, base.maxTx);
+  const entities = new Set(base.entities);
+  const attributes = new Set(base.attributes);
+  let previous = new Set<string>();
+  for (const f of base.facts.values()) if (f.txRetracted === null) previous.add(f.key);
+  let lastYield = Date.now();
 
-const yieldToEventLoop = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+  for (let t = from; t <= to; t++) {
+    const r = await query(db, SNAPSHOT_QUERY(t));
+    const current = new Set<string>();
+    const info: TxInfo = { count: t, wallMs: null, asserted: [], retracted: [] };
+
+    for (const row of r.results) {
+      const [e, a, v, tx, vf, vt] = row as [string, string, Scalar, number, number, number];
+      const validTo = vt >= FOREVER_THRESHOLD ? null : vt;
+      const key = JSON.stringify([e, a, v, tx, vf, validTo]);
+      current.add(key);
+      if (!facts.has(key)) {
+        facts.set(key, { key, e, a, v, validFrom: vf, validTo, txAsserted: tx, txRetracted: null, txIdMs: 0 });
+        info.asserted.push(key);
+        entities.add(e);
+        attributes.add(a);
+      }
+    }
+    for (const key of previous) {
+      if (current.has(key)) continue;
+      const f = facts.get(key);
+      // Copy before changing, so `base` stays as it was.
+      if (f && f.txRetracted === null) facts.set(key, { ...f, txRetracted: t });
+      info.retracted.push(key);
+    }
+    txs.push(info);
+    previous = current;
+    options.onProgress?.(t - from + 1, to - from + 1);
+    if (Date.now() - lastYield > 30) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      lastYield = Date.now();
+    }
+  }
+
+  // Wall-clock times. One query covers every transaction with a surviving
+  // version; the rare transaction whose versions were all retracted later
+  // gets its own query.
+  const wall = new Map<number, number>();
+  const readTimes = async (asOf: number) => {
+    const r = await query(db, TX_TIME_QUERY(asOf));
+    for (const [tx, tid] of r.results as [number, number][]) wall.set(tx, tid);
+  };
+  if (to >= from) await readTimes(to);
+  for (let t = from; t <= to; t++) {
+    const info = txs[t - 1];
+    if (info.asserted.length > 0 && !wall.has(t)) await readTimes(t);
+    info.wallMs = wall.get(t) ?? null;
+    if (info.wallMs !== null) {
+      for (const key of info.asserted) {
+        const f = facts.get(key);
+        if (f) facts.set(key, { ...f, txIdMs: info.wallMs });
+      }
+    }
+  }
+
+  return { maxTx: to, txs, facts, entities, attributes: [...attributes].sort() };
+}
 
 export async function extractHistory(
   db: MinigrafDb,
@@ -100,48 +181,25 @@ export async function extractHistory(
 ): Promise<History> {
   const limit = options.maxTransactions ?? 5000;
   const maxTx = Math.min(await lastTxCount(db, openInMemory), limit);
-  const facts = new Map<string, FactVersion>();
-  const txs: TxInfo[] = [];
-  const entities = new Set<string>();
-  const attributes = new Set<string>();
-  let previous = new Set<string>();
-  let lastYield = Date.now();
+  return readTransactions(db, emptyHistory(), maxTx, options);
+}
 
-  for (let t = 1; t <= maxTx; t++) {
-    const r = await query(db, SNAPSHOT_QUERY(t));
-    const current = new Set<string>();
-    const info: TxInfo = { count: t, wallMs: null, asserted: [], retracted: [] };
-
-    for (const row of r.results) {
-      const [e, a, v, tx, tid, vf, vt] = row as [string, string, Scalar, number, number, number, number];
-      const validTo = vt >= FOREVER_THRESHOLD ? null : vt;
-      const key = versionKey(e, a, v, tx, vf, validTo);
-      current.add(key);
-      if (!previous.has(key) && !facts.has(key)) {
-        facts.set(key, { key, e, a, v, validFrom: vf, validTo, txAsserted: tx, txRetracted: null, txIdMs: tid });
-        info.asserted.push(key);
-        info.wallMs = tid;
-        entities.add(e);
-        attributes.add(a);
-      }
-    }
-    for (const key of previous) {
-      if (!current.has(key)) {
-        const f = facts.get(key);
-        if (f && f.txRetracted === null) f.txRetracted = t;
-        info.retracted.push(key);
-      }
-    }
-    txs.push(info);
-    previous = current;
-    options.onProgress?.(t, maxTx);
-    if (Date.now() - lastYield > 30) {
-      await yieldToEventLoop();
-      lastYield = Date.now();
-    }
-  }
-
-  return { maxTx, txs, facts, entities, attributes: [...attributes].sort() };
+/**
+ * Bring `previous` up to date after new transactions were written to the same
+ * database. Only the new transactions are read. Falls back to a full rebuild
+ * if the database did not simply grow.
+ */
+export async function extendHistory(
+  db: MinigrafDb,
+  openInMemory: OpenInMemory,
+  previous: History,
+  options: ExtractOptions = {},
+): Promise<History> {
+  const limit = options.maxTransactions ?? 5000;
+  const maxTx = Math.min(await lastTxCount(db, openInMemory), limit);
+  if (maxTx < previous.maxTx) return extractHistory(db, openInMemory, options);
+  if (maxTx === previous.maxTx) return previous;
+  return readTransactions(db, previous, maxTx, options);
 }
 
 export function emptyHistory(): History {

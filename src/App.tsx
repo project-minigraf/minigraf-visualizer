@@ -92,6 +92,8 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      // Space on a focused button should press that button, not toggle playback.
+      if (e.key === " " && t?.closest("button, a, [role='tab'], [role='radio']")) return;
       if (e.key === "ArrowLeft") {
         cursor.step(-1);
         e.preventDefault();

@@ -4,7 +4,7 @@ import type { ValidAt } from "../lib/datalog";
 import { formatRange } from "../lib/format";
 import { formatValue, isEdgeFact } from "../lib/graph";
 import type { FactVersion } from "../lib/history";
-import { recordedAsOf } from "../lib/snapshot";
+import { recordedAsOf, removalKind } from "../lib/snapshot";
 import type { Sample } from "../samples";
 
 interface Props {
@@ -22,7 +22,7 @@ type Status = { label: string; cls: string };
 function statusOf(f: FactVersion, vm: ViewModel): Status {
   if (vm.visible.has(f.key)) return { label: "visible", cls: "ok" };
   if (f.txAsserted > vm.asOf) return { label: `recorded at tx ${f.txAsserted}`, cls: "future" };
-  if (!recordedAsOf(f, vm.asOf)) return { label: `retracted at tx ${f.txRetracted}`, cls: "del" };
+  if (!recordedAsOf(f, vm.asOf)) return { label: `${removalKind(vm.history, f)} at tx ${f.txRetracted}`, cls: "del" };
   return { label: "not valid at cursor", cls: "warn" };
 }
 
@@ -187,7 +187,7 @@ export function Inspector({ vm, selected, onSelect, onCursor, onShowMap, sample,
                       <span className={`value mono${s.cls === "del" ? " struck" : ""}`}>{formatValue(f.v, model)}</span>
                       <span className="muted small">
                         valid {formatRange(f.validFrom, f.validTo)} · tx {f.txAsserted}
-                        {f.txRetracted !== null ? ` → retracted tx ${f.txRetracted}` : ""}
+                        {f.txRetracted !== null ? ` → ${removalKind(history, f)} tx ${f.txRetracted}` : ""}
                       </span>
                       <span className={`chip ${s.cls}`}>{s.label}</span>
                     </button>

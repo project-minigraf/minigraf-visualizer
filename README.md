@@ -52,7 +52,9 @@ Minigraf does not expose its fact log directly. The visualizer rebuilds it with 
 
 1. It finds the last transaction number. It copies the database into a scratch in-memory instance (`exportGraph` / `importGraph`), writes one probe fact there, and reads the probe's `:db/tx-count`.
 2. For each transaction `N`, it runs one query with `:as-of N` and `:any-valid-time`. The query binds each fact's metadata through the pseudo-attributes `:db/tx-count`, `:db/tx-id`, `:db/valid-from` and `:db/valid-to`.
-3. It compares each snapshot with the one before. A fact version that appears at `N` was asserted by `N`. One that disappears at `N` was retracted by `N`.
+3. It compares each snapshot with the one before. A fact version that appears at `N` was asserted by `N`. One that disappears at `N` was removed by `N`. Usually that is a `retract`. It can also be a `transact` that writes the same fact with the same valid-time window again: Minigraf then keeps only the newest copy.
+
+Once hidden, a version never comes back, so this diff is exact. When you write through the console, only the new transactions are read.
 
 After that, moving the cursors is pure JavaScript, so it is instant. The filters use the same rules as the engine: a fact is visible when `tx-asserted ≤ N < tx-retracted` and `valid-from ≤ t < valid-to`. The test suite checks this against the real engine at every transaction and every valid-time boundary of every sample.
 
@@ -60,7 +62,7 @@ Minigraf stores `:alice` as a UUID (v5 of the keyword in the OID namespace). The
 
 ### Limits
 
-- Reading the history takes one query per transaction. That is fast for thousands of transactions but slow for very large files. The app reads at most 5,000 transactions.
+- Opening a database takes one query per transaction, and each query reads every fact. As a guide, 500 transactions with 1,500 facts take about 4 seconds. A progress bar shows while it runs. The app reads at most 5,000 transactions.
 - Rules are not stored in `.graph` files. The app replays rules for its own workspace, but not for opened files.
 - Minigraf 2.x can merge two values of the same attribute on one entity if they are written in one `transact` or `retract` ([minigraf#371](https://github.com/project-minigraf/minigraf/issues/371)). Write each value in its own call. The samples do this.
 - The wall-clock time of a retraction-only transaction is not queryable, so the log shows "retract" instead of a time.

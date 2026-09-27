@@ -68,3 +68,17 @@ export function validTimeExtent(history: History, nowMs: number): [number, numbe
   const pad = Math.max((hi - lo) * 0.06, 864e5);
   return [lo - pad, hi + pad];
 }
+
+/**
+ * Why a version stopped being visible: a `retract`, or a newer `transact` of
+ * the same fact with the same valid-time window (Minigraf keeps the newest).
+ */
+export function removalKind(history: History, f: FactVersion): "retracted" | "replaced" | null {
+  if (f.txRetracted === null) return null;
+  const tx = history.txs[f.txRetracted - 1];
+  const replaced = tx?.asserted.some((key) => {
+    const g = history.facts.get(key);
+    return g !== undefined && g.e === f.e && g.a === f.a && g.v === f.v && g.validFrom === f.validFrom && g.validTo === f.validTo;
+  });
+  return replaced ? "replaced" : "retracted";
+}
